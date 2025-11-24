@@ -1,0 +1,793 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Home, Dumbbell, Settings, Calendar, Play, Pause, FastForward, Check, Clock, Flame, BarChart3, ChevronDown, ChevronUp, RefreshCw, Volume2, VolumeX, Sun, Moon, Zap, User } from 'lucide-react';
+
+// --- 1. Exercise Database ---
+const EXERCISES = [
+  { id: 1, name: 'Jumping Jacks', baseDuration: 45, difficulty: 'Medium', caloriesPerMin: 10, lazy: { name: 'Step Jacks', duration: 45, description: 'Step one leg out at a time instead of jumping.', level: 'Easy' } },
+  { id: 2, name: 'Push-ups', baseDuration: 30, difficulty: 'Hard', caloriesPerMin: 12, lazy: { name: 'Wall Push-ups', duration: 30, description: 'Push against a wall to reduce resistance.', level: 'Easy' } },
+  { id: 3, name: 'Squats', baseDuration: 45, difficulty: 'Medium', caloriesPerMin: 9, lazy: { name: 'Chair Squats', duration: 45, description: 'Squat until your glutes tap a chair, then stand up.', level: 'Easy' } },
+  { id: 4, name: 'Plank', baseDuration: 30, difficulty: 'Hard', caloriesPerMin: 6, lazy: { name: 'Knee Plank', duration: 30, description: 'Hold the plank position with your knees on the floor.', level: 'Easy' } },
+  { id: 5, name: 'Lunges', baseDuration: 40, difficulty: 'Medium', caloriesPerMin: 11, lazy: { name: 'Backward Lunges', duration: 40, description: 'Step backward instead of forward for better stability.', level: 'Medium' } },
+  { id: 6, name: 'High Knees', baseDuration: 30, difficulty: 'Hard', caloriesPerMin: 14, lazy: { name: 'March in Place', duration: 30, description: 'March slowly, lifting knees to waist height.', level: 'Easy' } },
+  { id: 7, name: 'Mountain Climbers', baseDuration: 30, difficulty: 'Hard', caloriesPerMin: 13, lazy: { name: 'Slow Climbers', duration: 30, description: 'Perform the movement slowly, focusing on core engagement.', level: 'Medium' } },
+  { id: 8, name: 'Burpees', baseDuration: 30, difficulty: 'Hard', caloriesPerMin: 15, lazy: { name: 'Step Burpees', duration: 30, description: 'Step feet back and forward instead of jumping.', level: 'Medium' } },
+];
+
+const REST_DURATION = 10;
+const REWARDED_AD_SECONDS = 5; // Placeholder for ad length
+
+// --- 2. Utility Functions ---
+
+// Persistence Helper
+const loadState = (key, defaultValue) => {
+  try {
+    const serializedState = localStorage.getItem(key);
+    if (serializedState === null) {
+      return defaultValue;
+    }
+    return JSON.parse(serializedState);
+  } catch (error) {
+    console.error("Error loading state from localStorage:", error);
+    return defaultValue;
+  }
+};
+
+const saveState = (key, state) => {
+  try {
+    const serializedState = JSON.stringify(state);
+    localStorage.setItem(key, serializedState);
+  } catch (error) {
+    console.error("Error saving state to localStorage:", error);
+  }
+};
+
+const formatTime = (seconds) => {
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+};
+
+const generateWorkout = (count = 5) => {
+  const shuffled = EXERCISES.sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, count).map(ex => ({
+    ...ex,
+    isLazy: false,
+    duration: ex.baseDuration,
+    status: 'pending',
+  }));
+};
+
+// --- 3. Custom Components ---
+
+const Header = ({ title, onNavigate, screen }) => {
+  const NavButton = ({ icon: Icon, targetScreen, currentScreen, label }) => (
+    <button
+      onClick={() => onNavigate(targetScreen)}
+      className={`p-2 rounded-full transition-colors ${currentScreen === targetScreen ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-700'}`}
+      aria-label={label}
+    >
+      <Icon size={20} />
+    </button>
+  );
+
+  return (
+    <header className="flex justify-between items-center p-4 bg-gray-800 shadow-lg sticky top-0 z-10">
+      <h1 className="text-xl font-bold text-white tracking-wider">{title}</h1>
+      <div className="flex space-x-2">
+        <NavButton icon={Home} targetScreen="Home" currentScreen={screen} label="Home" />
+        <NavButton icon={BarChart3} targetScreen="Progress" currentScreen={screen} label="Progress" />
+        <NavButton icon={Settings} targetScreen="Settings" currentScreen={screen} label="Settings" />
+      </div>
+    </header>
+  );
+};
+
+const ExerciseDetails = ({ exercise, isLazyMode, onToggleLazy }) => {
+  const [showInstructions, setShowInstructions] = useState(false);
+  const current = isLazyMode ? exercise.lazy : exercise;
+  const badgeColor = current.level === 'Easy' ? 'bg-green-500' : current.level === 'Medium' ? 'bg-yellow-500' : 'bg-red-500';
+
+  return (
+    <div className="bg-gray-700 p-4 rounded-xl shadow-inner mb-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-extrabold text-white mb-2">{current.name}</h2>
+        <span className={`px-3 py-1 text-xs font-semibold rounded-full text-white ${badgeColor}`}>
+          {current.level || exercise.difficulty}
+        </span>
+      </div>
+
+      <p className="text-gray-400 mb-4 italic">{current.description || 'Perform the classic exercise with good form.'}</p>
+
+      {/* Lazy Mode Toggle */}
+      {exercise.lazy && (
+        <button
+          onClick={onToggleLazy}
+          className={`w-full py-2 mb-4 rounded-lg font-semibold transition-colors flex items-center justify-center ${
+            isLazyMode ? 'bg-indigo-500 hover:bg-indigo-400' : 'bg-green-600 hover:bg-green-500'
+          } text-white`}
+        >
+          {isLazyMode ? (
+            <RefreshCw size={16} className="mr-2" />
+          ) : (
+            <Zap size={16} className="mr-2" />
+          )}
+          {isLazyMode ? 'Back to Base Mode' : `Switch to Lazy Mode: ${exercise.lazy.name}`}
+        </button>
+      )}
+
+      {/* Instructions Modal/Expandable */}
+      <button
+        onClick={() => setShowInstructions(!showInstructions)}
+        className="w-full text-indigo-400 hover:text-indigo-300 flex justify-center items-center py-1"
+      >
+        {showInstructions ? 'Hide Instructions' : 'Show Instructions'}
+        {showInstructions ? <ChevronUp size={16} className="ml-1" /> : <ChevronDown size={16} className="ml-1" />}
+      </button>
+      {showInstructions && (
+        <div className="mt-3 p-3 bg-gray-600 rounded-lg text-sm text-gray-200">
+          <ul className="list-disc list-inside space-y-1">
+            <li>Ensure proper form to prevent injury.</li>
+            <li>Maintain a steady, controlled pace.</li>
+            <li>Breathe deeply throughout the exercise.</li>
+            <li>Focus on the muscle groups being worked.</li>
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CompletionModal = ({ workoutData, onClose, onBackToHome }) => {
+  const totalCalories = Math.round(workoutData.calories);
+  const totalTime = formatTime(workoutData.duration);
+  const totalExercises = workoutData.exercises.length;
+
+  return (
+    <div className="fixed inset-0 bg-gray-900 bg-opacity-95 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl max-w-sm w-full text-center border-4 border-green-500">
+        <Check size={64} className="text-green-500 mx-auto mb-4 animate-bounce" />
+        <h2 className="text-4xl font-extrabold text-white mb-2">Workout Complete!</h2>
+        <p className="text-indigo-400 mb-6 text-lg">No excuses. You crushed your 20 minutes.</p>
+
+        <div className="space-y-3 mb-8">
+          <StatCard icon={Clock} label="Time Taken" value={totalTime} color="text-indigo-400" />
+          <StatCard icon={Dumbbell} label="Exercises Performed" value={totalExercises} color="text-yellow-400" />
+          <StatCard icon={Flame} label="Estimated Calories Burned" value={`${totalCalories} kcal`} color="text-red-400" />
+        </div>
+
+        <button
+          onClick={onBackToHome}
+          className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-xl transition-colors shadow-lg"
+        >
+          Back to Home
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const StatCard = ({ icon: Icon, label, value, color }) => (
+  <div className="flex justify-between items-center bg-gray-700 p-3 rounded-lg">
+    <div className="flex items-center">
+      <Icon size={20} className={`mr-3 ${color}`} />
+      <span className="text-gray-300 text-sm">{label}</span>
+    </div>
+    <span className="text-white font-semibold">{value}</span>
+  </div>
+);
+
+// --- 4. Screen Components ---
+
+const HomeScreen = ({ streak, onStartWorkout }) => (
+  <div className="p-6 flex flex-col items-center justify-center h-full text-center">
+    <div className="flex items-center justify-center bg-gray-700 p-3 rounded-full mb-8 shadow-xl">
+      <Flame size={24} className="text-red-400 mr-2 animate-pulse" />
+      <span className="text-2xl font-black text-white">{`🔥 ${streak} Day Streak`}</span>
+    </div>
+
+    <h2 className="text-5xl font-extrabold text-white mb-4 leading-tight">
+      Ready for your 20 minutes?
+    </h2>
+    <p className="text-xl text-gray-400 mb-12">
+      No excuses. Just 20 minutes to feel the burn.
+    </p>
+
+    <button
+      onClick={onStartWorkout}
+      className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-2xl py-5 px-10 rounded-3xl transition-all duration-300 shadow-2xl shadow-indigo-700/50 transform hover:scale-105"
+    >
+      START WORKOUT
+    </button>
+
+    <div className="absolute bottom-4 w-full px-6">
+      <div className="bg-yellow-800 text-yellow-200 text-xs text-center py-2 rounded-lg italic">
+        [ AD PLACEHOLDER: Get 1 Month Free! ]
+      </div>
+    </div>
+  </div>
+);
+
+const WorkoutScreen = ({
+  currentWorkout,
+  currentExerciseIndex,
+  workoutState,
+  timeRemaining,
+  preferences,
+  setWorkoutState,
+  setTimeRemaining,
+  setCurrentExerciseIndex,
+  onCompleteWorkout,
+}) => {
+  const [isLazyMode, setIsLazyMode] = useState(preferences.lazyModeDefault);
+  const [adTimeRemaining, setAdTimeRemaining] = useState(0);
+
+  const currentEx = currentWorkout[currentExerciseIndex];
+  const totalExercises = currentWorkout.length;
+  const isRest = workoutState === 'rest';
+  const exerciseStatusText = isRest ? 'REST' : 'WORK';
+
+  // Determine the current duration goal
+  const durationGoal = isRest ? REST_DURATION : (isLazyMode && currentEx.lazy ? currentEx.lazy.duration : currentEx.baseDuration);
+
+  // Auto-Progression Logic (Timer useEffect)
+  useEffect(() => {
+    if (workoutState === 'in-progress' || workoutState === 'rest' || adTimeRemaining > 0) {
+      const interval = setInterval(() => {
+        if (adTimeRemaining > 0) {
+          setAdTimeRemaining(t => t - 1);
+        } else if (timeRemaining > 1) {
+          setTimeRemaining(t => t - 1);
+        } else {
+          // Time is up (timeRemaining === 1)
+          if (isRest) {
+            // End rest, start next exercise
+            setWorkoutState('in-progress');
+            setCurrentExerciseIndex(i => i + 1);
+            setTimeRemaining(currentEx.baseDuration); // This duration will be overwritten by the next effect cycle, but required here for state update sequence
+          } else {
+            // End exercise, start rest or complete
+            if (currentExerciseIndex < totalExercises - 1) {
+              setWorkoutState('rest');
+              setTimeRemaining(REST_DURATION);
+            } else {
+              // Workout finished!
+              onCompleteWorkout();
+            }
+          }
+        }
+      }, 1000);
+
+      return () => clearInterval(interval);
+    }
+  }, [workoutState, timeRemaining, currentExerciseIndex, totalExercises, isRest, setTimeRemaining, setWorkoutState, setCurrentExerciseIndex, onCompleteWorkout, adTimeRemaining]);
+
+  // Sync Timer when exercise changes or lazy mode toggles
+  useEffect(() => {
+    if (currentEx) {
+      if (workoutState === 'in-progress') {
+        const newDuration = isLazyMode && currentEx.lazy ? currentEx.lazy.duration : currentEx.baseDuration;
+        setTimeRemaining(newDuration);
+      } else if (workoutState === 'rest') {
+        setTimeRemaining(REST_DURATION);
+      }
+    }
+    // Reset lazy mode for new exercise unless default is set
+    if (currentExerciseIndex > 0) {
+      setIsLazyMode(preferences.lazyModeDefault);
+    }
+  }, [currentExerciseIndex, isLazyMode, preferences.lazyModeDefault]);
+
+
+  const handlePauseToggle = () => {
+    setWorkoutState(workoutState === 'in-progress' || workoutState === 'rest' ? 'paused' : 'in-progress');
+  };
+
+  const handleSkip = () => {
+    if (adTimeRemaining > 0) return; // Cannot skip while watching ad
+
+    // Placeholder: Start Rewarded Ad sequence
+    setWorkoutState('paused');
+    setAdTimeRemaining(REWARDED_AD_SECONDS);
+
+    // After ad (simulated by timeout), advance
+    setTimeout(() => {
+      setAdTimeRemaining(0);
+      handleMarkDone();
+    }, REWARDED_AD_SECONDS * 1000);
+  };
+
+  const handleMarkDone = () => {
+    if (currentExerciseIndex < totalExercises - 1) {
+      // Mark current as done and start rest
+      setWorkoutState('rest');
+      setTimeRemaining(REST_DURATION);
+    } else {
+      // Workout finished!
+      onCompleteWorkout();
+    }
+  };
+
+  const handleToggleLazy = () => {
+    setIsLazyMode(prev => !prev);
+    // Restart timer for the current segment to load the new duration
+    if (workoutState !== 'paused') {
+      setWorkoutState('paused'); // Pause temporarily to sync duration
+      setTimeout(() => setWorkoutState('in-progress'), 100);
+    }
+  };
+
+  const progressBarWidth = (durationGoal - timeRemaining) / durationGoal * 100;
+
+  return (
+    <div className="p-4 flex flex-col h-full">
+      {/* Top Section: Video Placeholder & Controls */}
+      <div className="relative w-full aspect-video bg-gray-900 rounded-xl shadow-2xl mb-4 overflow-hidden">
+        {/* Placeholder: Exercise Video/Image */}
+        <div className="flex items-center justify-center h-full text-center text-gray-500">
+          <Dumbbell size={60} className="text-indigo-600/50" />
+          <p className="absolute bottom-4 bg-gray-900/70 text-sm p-1 rounded">
+            Video Guide Placeholder: {currentEx.name}
+          </p>
+        </div>
+        {/* Pause/Resume Button */}
+        <button
+          onClick={handlePauseToggle}
+          className="absolute top-3 right-3 p-3 bg-gray-900/80 hover:bg-gray-800 rounded-full text-white shadow-lg transition-all"
+        >
+          {workoutState === 'in-progress' || workoutState === 'rest' ? <Pause size={20} /> : <Play size={20} />}
+        </button>
+      </div>
+
+      {/* Progress Indicator */}
+      <div className="text-center mb-4">
+        <p className="text-gray-400 font-semibold uppercase">
+          Exercise {currentExerciseIndex + 1} of {totalExercises}
+        </p>
+        <div className="h-2 w-full bg-gray-700 rounded-full overflow-hidden mt-1">
+          <div
+            className="h-full bg-indigo-500 transition-all duration-300"
+            style={{ width: `${(currentExerciseIndex / totalExercises) * 100}%` }}
+          ></div>
+        </div>
+      </div>
+
+      {/* Timer & Exercise Info */}
+      <div className="flex-1 overflow-y-auto pb-4">
+        <ExerciseDetails
+          exercise={currentEx}
+          isLazyMode={isLazyMode}
+          onToggleLazy={handleToggleLazy}
+        />
+
+        {/* Timer Display */}
+        <div className={`text-center p-6 rounded-xl shadow-2xl transition-all duration-500 transform ${isRest ? 'bg-red-700/80 border-red-500' : 'bg-indigo-700/80 border-indigo-500'} border-4`}>
+          <p className="text-xl font-bold text-white mb-1 uppercase tracking-widest">
+            {adTimeRemaining > 0 ? 'AD BREAK' : exerciseStatusText}
+          </p>
+          <div className="text-8xl font-black text-white">{formatTime(timeRemaining)}</div>
+          <p className="text-sm text-gray-200 mt-1">{isRest ? 'Next Up: ' + currentWorkout[currentExerciseIndex + 1]?.name : 'Total Duration: ' + formatTime(durationGoal)}</p>
+        </div>
+
+        {/* Progress Bar for Timer */}
+        <div className="h-4 w-full bg-gray-700 rounded-full overflow-hidden mt-4">
+          <div
+            className={`h-full ${isRest ? 'bg-red-400' : 'bg-green-400'} transition-all duration-1000`}
+            style={{ width: `${progressBarWidth}%` }}
+          ></div>
+        </div>
+      </div>
+
+      {/* Control Buttons */}
+      <div className="flex space-x-3 pt-4 border-t border-gray-700">
+        <button
+          onClick={handleSkip}
+          disabled={adTimeRemaining > 0}
+          className={`flex-1 flex items-center justify-center py-3 rounded-xl font-semibold transition-colors ${adTimeRemaining > 0 ? 'bg-gray-500 cursor-not-allowed' : 'bg-yellow-600 hover:bg-yellow-500'} text-white shadow-md`}
+        >
+          <FastForward size={20} className="mr-2" />
+          {adTimeRemaining > 0 ? `Ad: ${adTimeRemaining}s` : 'Skip (Watch Ad)'}
+        </button>
+        <button
+          onClick={handleMarkDone}
+          className="flex-1 flex items-center justify-center py-3 rounded-xl bg-green-600 hover:bg-green-500 text-white font-semibold transition-colors shadow-md"
+        >
+          <Check size={20} className="mr-2" />
+          Mark as Done
+        </button>
+      </div>
+
+      {/* Global Pause Overlay */}
+      {workoutState === 'paused' && adTimeRemaining === 0 && (
+        <div className="absolute inset-0 bg-gray-900 bg-opacity-70 flex items-center justify-center backdrop-blur-sm">
+          <button
+            onClick={handlePauseToggle}
+            className="p-6 bg-indigo-600 text-white rounded-full shadow-2xl transform hover:scale-110 transition-transform"
+          >
+            <Play size={40} />
+            <span className="block mt-2 text-sm font-bold">RESUME</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ProgressScreen = ({ streak, history }) => {
+  const totalWorkouts = history.length;
+  const totalDuration = history.reduce((sum, w) => sum + w.duration, 0);
+  const totalCalories = Math.round(history.reduce((sum, w) => sum + w.calories, 0));
+  const [selectedDate, setSelectedDate] = useState(null);
+
+  // Simple Calendar Generation (Current Month)
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 for Sunday, 1 for Monday...
+  const workoutDates = useMemo(() => new Set(history.map(w => w.date)), [history]);
+  const monthName = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const renderCalendar = () => {
+    const calendarDays = [];
+    for (let i = 0; i < firstDayOfMonth; i++) {
+      calendarDays.push(<div key={`empty-${i}`} className="p-2"></div>);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const isCompleted = workoutDates.has(dateString);
+      const isToday = day === today.getDate() && month === today.getMonth();
+
+      let classes = 'p-2 text-center rounded-lg font-semibold cursor-pointer transition-colors';
+      if (isCompleted) {
+        classes += ' bg-green-600 text-white shadow-lg hover:bg-green-500';
+      } else if (isToday) {
+        classes += ' border-2 border-indigo-400 text-indigo-400';
+      } else {
+        classes += ' bg-gray-700 text-gray-300 hover:bg-gray-600';
+      }
+
+      calendarDays.push(
+        <button
+          key={day}
+          className={classes}
+          onClick={() => isCompleted && setSelectedDate(dateString)}
+        >
+          {day}
+        </button>
+      );
+    }
+    return calendarDays;
+  };
+
+  const selectedWorkout = history.find(w => w.date === selectedDate);
+
+  return (
+    <div className="p-6 h-full overflow-y-auto">
+      <h2 className="text-3xl font-bold text-white mb-6 border-b border-gray-700 pb-2">Your Fitness Journey</h2>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 gap-4 mb-8">
+        <StatCard icon={Flame} label="Current Streak" value={`${streak} Days`} color="text-red-400" />
+        <StatCard icon={Dumbbell} label="Total Workouts" value={totalWorkouts} color="text-indigo-400" />
+        <StatCard icon={Clock} label="Total Minutes" value={Math.round(totalDuration / 60)} color="text-yellow-400" />
+        <StatCard icon={Zap} label="Calories Burned" value={`${totalCalories} kcal`} color="text-green-400" />
+      </div>
+
+      {/* Calendar View */}
+      <div className="bg-gray-800 p-4 rounded-xl shadow-xl mb-8">
+        <h3 className="text-xl font-bold text-white mb-4 flex items-center">
+          <Calendar size={20} className="mr-2 text-indigo-400" />
+          {monthName}
+        </h3>
+        <div className="grid grid-cols-7 text-sm text-gray-400 font-medium mb-2">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+            <div key={day} className="text-center">{day}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {renderCalendar()}
+        </div>
+      </div>
+
+      {/* Workout History Details */}
+      {selectedWorkout && (
+        <div className="bg-gray-700 p-4 rounded-xl shadow-xl">
+          <h3 className="text-xl font-bold text-white mb-3">Workout on {selectedDate}</h3>
+          <p className="text-gray-300 mb-4">Duration: {formatTime(selectedWorkout.duration)} | Calories: {Math.round(selectedWorkout.calories)} kcal</p>
+          <ul className="space-y-2">
+            {selectedWorkout.exercises.map((ex, index) => (
+              <li key={index} className="flex justify-between items-center p-3 bg-gray-600 rounded-lg">
+                <span className="font-medium text-white">{ex.name}</span>
+                <span className={`text-sm ${ex.isLazy ? 'text-indigo-300' : 'text-green-300'}`}>
+                  {ex.isLazy ? 'Lazy' : 'Base'} Mode - {ex.duration}s
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => setSelectedDate(null)} className="mt-4 text-sm text-indigo-400 hover:text-indigo-300">
+            Close Details
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SettingsScreen = ({ preferences, setPreferences }) => {
+  const updatePref = (key, value) => {
+    setPreferences(prev => ({ ...prev, [key]: value }));
+  };
+
+  const ToggleSwitch = ({ label, value, onToggle }) => (
+    <div className="flex justify-between items-center py-3 border-b border-gray-700 last:border-b-0">
+      <span className="text-gray-300">{label}</span>
+      <button
+        onClick={onToggle}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+          value ? 'bg-indigo-600' : 'bg-gray-500'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+            value ? 'translate-x-6' : 'translate-x-1'
+          }`}
+        />
+      </button>
+    </div>
+  );
+
+  const DifficultySelector = () => (
+    <div className="py-3 border-b border-gray-700">
+      <label className="block text-gray-300 mb-2">Default Workout Difficulty</label>
+      <div className="flex space-x-2">
+        {['Easy', 'Medium', 'Hard'].map(level => (
+          <button
+            key={level}
+            onClick={() => updatePref('difficulty', level)}
+            className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
+              preferences.difficulty === level ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+            }`}
+          >
+            {level}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="p-6 h-full overflow-y-auto">
+      <h2 className="text-3xl font-bold text-white mb-6 border-b border-gray-700 pb-2">App Settings</h2>
+
+      <div className="bg-gray-800 p-4 rounded-xl shadow-xl space-y-4">
+        <DifficultySelector />
+
+        <ToggleSwitch
+          label="Sound Notifications"
+          value={preferences.sounds}
+          onToggle={() => updatePref('sounds', !preferences.sounds)}
+        />
+        
+        <ToggleSwitch
+          label="Default to Lazy Mode"
+          value={preferences.lazyModeDefault}
+          onToggle={() => updatePref('lazyModeDefault', !preferences.lazyModeDefault)}
+        />
+      </div>
+
+      <div className="mt-8 p-4 bg-gray-800 rounded-xl shadow-xl">
+        <h3 className="text-xl font-bold text-white mb-2">About LazyFit 20</h3>
+        <p className="text-gray-400 text-sm">
+          Version 1.0. Designed for the fit-minded minimalist. All your data is stored securely on your device.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// --- 5. Main App Component ---
+
+const initialPreferences = {
+  difficulty: 'Medium',
+  sounds: true,
+  lazyModeDefault: false,
+};
+
+const App = () => {
+  const [screen, setScreen] = useState('Home'); // Home, Workout, Progress, Settings
+  const [preferences, setPreferences] = useState(initialPreferences);
+  const [streak, setStreak] = useState(0);
+  const [workoutHistory, setWorkoutHistory] = useState([]);
+
+  // Workout specific state
+  const [currentWorkout, setCurrentWorkout] = useState(null);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+  const [workoutState, setWorkoutState] = useState('idle'); // idle, in-progress, paused, rest, completed
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [workoutStartTime, setWorkoutStartTime] = useState(null);
+
+  // --- Persistence Handlers (localStorage) ---
+  useEffect(() => {
+    setPreferences(loadState('lazyfit-preferences', initialPreferences));
+    setStreak(loadState('lazyfit-streak', 0));
+    setWorkoutHistory(loadState('lazyfit-history', []));
+    // Apply dark mode preference (Tailwind standard)
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  useEffect(() => {
+    saveState('lazyfit-preferences', preferences);
+  }, [preferences]);
+
+  useEffect(() => {
+    saveState('lazyfit-streak', streak);
+  }, [streak]);
+
+  useEffect(() => {
+    saveState('lazyfit-history', workoutHistory);
+  }, [workoutHistory]);
+
+  // --- Workout Logic ---
+
+  const handleStartWorkout = () => {
+    setCurrentWorkout(generateWorkout());
+    setCurrentExerciseIndex(0);
+    setWorkoutState('in-progress');
+    setWorkoutStartTime(Date.now());
+    setScreen('Workout');
+  };
+
+  const updateStreak = useCallback((history) => {
+    const today = new Date().toISOString().split('T')[0];
+    const sortedHistory = history.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    if (sortedHistory.length === 0) {
+      setStreak(1);
+      return;
+    }
+
+    let currentStreak = 0;
+    let lastDate = null;
+
+    for (const workout of sortedHistory) {
+      const workoutDate = workout.date;
+
+      if (workoutDate === today) {
+        currentStreak++;
+        lastDate = new Date(workoutDate);
+        continue;
+      }
+
+      const currentDate = new Date(workoutDate);
+      if (lastDate) {
+        // Check if day is consecutive
+        const dayDifference = (lastDate.getTime() - currentDate.getTime()) / (1000 * 3600 * 24);
+        if (dayDifference === 1) {
+          currentStreak++;
+        } else {
+          break; // Streak broken
+        }
+      } else {
+        // If the first workout is yesterday, streak is 1
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayString = yesterday.toISOString().split('T')[0];
+        if (workoutDate === yesterdayString) {
+          currentStreak = 1;
+        }
+        break;
+      }
+      lastDate = currentDate;
+    }
+
+    // Set minimum streak to 1 if a workout was done today
+    if (history.some(w => w.date === today)) {
+      setStreak(Math.max(1, currentStreak));
+    } else {
+      setStreak(currentStreak);
+    }
+  }, []);
+
+  const handleCompleteWorkout = useCallback(() => {
+    const totalDurationSeconds = Math.round((Date.now() - workoutStartTime) / 1000);
+    const totalCalories = currentWorkout.reduce((sum, ex) => {
+      // Calculate based on the duration *of the base exercise* and its associated calories
+      // A more accurate model would track lazy mode usage, but for simplicity, we use the base duration/calories
+      const duration = ex.isLazy && ex.lazy ? ex.lazy.duration : ex.baseDuration;
+      const minutes = duration / 60;
+      return sum + (minutes * ex.caloriesPerMin);
+    }, 0);
+
+    const newWorkoutEntry = {
+      date: new Date().toISOString().split('T')[0],
+      exercises: currentWorkout,
+      duration: totalDurationSeconds,
+      calories: totalCalories,
+    };
+
+    setWorkoutHistory(prev => {
+      const updatedHistory = [...prev, newWorkoutEntry];
+      updateStreak(updatedHistory);
+      return updatedHistory;
+    });
+
+    setWorkoutState('completed');
+  }, [currentWorkout, workoutStartTime, updateStreak]);
+
+  // Handle auto-start of next exercise/rest after index change
+  useEffect(() => {
+    if (workoutState === 'in-progress' && currentWorkout && currentExerciseIndex < currentWorkout.length) {
+      const currentEx = currentWorkout[currentExerciseIndex];
+      const duration = preferences.lazyModeDefault && currentEx.lazy ? currentEx.lazy.duration : currentEx.baseDuration;
+      setTimeRemaining(duration);
+    } else if (workoutState === 'rest') {
+      setTimeRemaining(REST_DURATION);
+    }
+  }, [currentExerciseIndex, currentWorkout, workoutState, preferences.lazyModeDefault]);
+
+  // Initial time set when starting workout
+  useEffect(() => {
+    if (currentWorkout && workoutState === 'in-progress' && currentExerciseIndex === 0) {
+      const initialEx = currentWorkout[0];
+      const duration = preferences.lazyModeDefault && initialEx.lazy ? initialEx.lazy.duration : initialEx.baseDuration;
+      setTimeRemaining(duration);
+    }
+  }, [currentWorkout, workoutState]); // Only run on first load of workout state
+
+  // --- Render Logic ---
+  const renderScreen = () => {
+    switch (screen) {
+      case 'Workout':
+        if (workoutState === 'completed') {
+          const workoutData = workoutHistory[workoutHistory.length - 1];
+          return (
+            <WorkoutScreen
+              {...{ currentWorkout, currentExerciseIndex, workoutState, timeRemaining, preferences, setWorkoutState, setTimeRemaining, setCurrentExerciseIndex, onCompleteWorkout: handleCompleteWorkout }}
+            />
+          ); // The modal is a fixed overlay, screen still renders behind
+        }
+        if (currentWorkout && workoutState !== 'idle') {
+          return (
+            <WorkoutScreen
+              {...{ currentWorkout, currentExerciseIndex, workoutState, timeRemaining, preferences, setWorkoutState, setTimeRemaining, setCurrentExerciseIndex, onCompleteWorkout: handleCompleteWorkout }}
+            />
+          );
+        }
+        return <HomeScreen streak={streak} onStartWorkout={handleStartWorkout} />;
+      case 'Progress':
+        return <ProgressScreen streak={streak} history={workoutHistory} />;
+      case 'Settings':
+        return <SettingsScreen preferences={preferences} setPreferences={setPreferences} />;
+      case 'Home':
+      default:
+        return <HomeScreen streak={streak} onStartWorkout={handleStartWorkout} />;
+    }
+  };
+
+  const handleBackToHome = () => {
+    setScreen('Home');
+    setCurrentWorkout(null);
+    setWorkoutState('idle');
+  };
+
+  const completionData = workoutHistory[workoutHistory.length - 1];
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex flex-col font-sans">
+      <Header title="LazyFit 20" onNavigate={setScreen} screen={screen} />
+      <main className="flex-1 overflow-y-auto pt-0 relative">
+        {renderScreen()}
+      </main>
+
+      {/* Completion Modal Overlay */}
+      {workoutState === 'completed' && completionData && (
+        <CompletionModal workoutData={completionData} onClose={() => setWorkoutState('idle')} onBackToHome={handleBackToHome} />
+      )}
+    </div>
+  );
+};
+
+export default App;
